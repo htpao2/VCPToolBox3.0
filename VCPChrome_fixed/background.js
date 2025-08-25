@@ -14,7 +14,7 @@ function connect() {
     chrome.storage.local.get(['serverUrl', 'vcpKey'], (result) => {
         const serverUrlToUse = result.serverUrl || defaultServerUrl;
         const keyToUse = result.vcpKey || defaultVcpKey;
-        
+
         const fullUrl = `${serverUrlToUse}/vcp-chrome-observer/VCP_Key=${keyToUse}`;
         console.log('Connecting to:', fullUrl);
 
@@ -30,7 +30,7 @@ function connect() {
         ws.onmessage = (event) => {
             console.log('Message from server:', event.data);
             const message = JSON.parse(event.data);
-            
+
             // 处理来自服务器的指令
             if (message.type === 'command') {
                 const commandData = message.data;

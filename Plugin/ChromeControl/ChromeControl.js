@@ -1,15 +1,8 @@
 // Plugin/ChromeControl/ChromeControl.js
-// A synchronous stdio plugin that acts as a temporary WebSocket client.
+// A synchronous stdio plugin that calls the central WebSocketServer to send commands.
 
-const WebSocket = require('ws');
+const WebSocketServer = require('../../WebSocketServer.js');
 
-// --- Configuration ---
-// These should match your server's settings.
-const PORT = process.env.PORT || '8088';
-const SERVER_URL = process.env.WEBSOCKET_URL || `ws://localhost:${PORT}`;
-const VCP_KEY = process.env.VCP_Key || '123456';
-
-// --- Helper Functions ---
 function readInput() {
     return new Promise((resolve) => {
         const chunks = [];
@@ -20,84 +13,39 @@ function readInput() {
     });
 }
 
-function generateRequestId() {
-    return `cc-req-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-}
-
 function writeOutput(data) {
     process.stdout.write(JSON.stringify(data));
 }
 
-// --- Main Execution Logic ---
+function generateRequestId() {
+    return `cc-req-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+}
+
 async function main() {
-    let ws;
     try {
         const inputString = await readInput();
-        const inputData = JSON.parse(inputString);
-        const { command, ...args } = inputData;
+        const commandData = JSON.parse(inputString);
 
-        if (!command) {
-            throw new Error("命令 'command' 不能为空。");
+        if (!commandData.command) {
+            throw new Error("The 'command' field cannot be empty.");
         }
 
-        const fullUrl = `${SERVER_URL}/vcp-chrome-control/VCP_Key=${VCP_KEY}`;
-        ws = new WebSocket(fullUrl);
+        // Ensure there is a requestId for tracking
+        if (!commandData.requestId) {
+            commandData.requestId = generateRequestId();
+        }
 
-        const result = await new Promise((resolve, reject) => {
-            const requestId = generateRequestId();
-            
-            const timeout = setTimeout(() => {
-                reject(new Error('命令执行超时。'));
-            }, 10000); // 10秒超时
-
-            ws.on('open', () => {
-                const payload = {
-                    type: 'command',
-                    data: {
-                        requestId,
-                        command,
-                        ...args
-                    }
-                };
-                ws.send(JSON.stringify(payload));
-            });
-
-            ws.on('message', (message) => {
-                const msg = JSON.parse(message);
-                if (msg.data && msg.data.requestId === requestId) {
-                    clearTimeout(timeout);
-                    if (msg.type === 'command_result') {
-                        if (msg.data.status === 'success') {
-                            // 接受 result 或 message 字段作为成功信息
-                            resolve({ status: 'success', result: msg.data.result || msg.data.message });
-                        } else {
-                            reject(new Error(msg.data.error || 'Chrome端执行命令失败。'));
-                        }
-                    } else {
-                        reject(new Error(`收到意外的消息类型: ${msg.type}`));
-                    }
-                }
-            });
-
-            ws.on('error', (err) => {
-                clearTimeout(timeout);
-                reject(new Error(`WebSocket连接错误: ${err.message}`));
-            });
-
-            ws.on('close', (code, reason) => {
-                clearTimeout(timeout);
-                reject(new Error(`WebSocket连接意外关闭。代码: ${code}, 原因: ${reason}`));
-            });
-        });
+        // Use the new, unified command channel
+        const result = await WebSocketServer.sendCommandToChrome(commandData);
 
         writeOutput(result);
 
     } catch (error) {
-        writeOutput({ status: 'error', error: error.message });
+        // Ensure the error message is a string
+        const errorMessage = (error instanceof Error) ? error.message : String(error);
+        writeOutput({ status: 'error', error: errorMessage });
     } finally {
-        if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.close();
-        }
+        // The process must exit for the PluginManager to continue.
         process.exit(0);
     }
 }

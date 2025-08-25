@@ -12,9 +12,9 @@ let serverConfig = {
 // 用于存储不同类型的客户端
 const clients = new Map(); // VCPLog 等普通客户端
 const distributedServers = new Map(); // 分布式服务器客户端
-const chromeControlClients = new Map(); // ChromeControl 客户端
 const chromeObserverClients = new Map(); // 新增：ChromeObserver 客户端
 const pendingToolRequests = new Map(); // 跨服务器工具调用的待处理请求
+const pendingChromeCommands = new Map(); // 用于追踪发送给Chrome的命令
 const distributedServerIPs = new Map(); // 新增：存储分布式服务器的IP信息
 
 function generateClientId() {
@@ -49,12 +49,10 @@ function initialize(httpServer, config) {
 
         const vcpLogPathRegex = /^\/VCPlog\/VCP_Key=(.+)$/;
         const distServerPathRegex = /^\/vcp-distributed-server\/VCP_Key=(.+)$/;
-        const chromeControlPathRegex = /^\/vcp-chrome-control\/VCP_Key=(.+)$/;
         const chromeObserverPathRegex = /^\/vcp-chrome-observer\/VCP_Key=(.+)$/;
 
         const vcpMatch = pathname.match(vcpLogPathRegex);
         const distMatch = pathname.match(distServerPathRegex);
-        const chromeControlMatch = pathname.match(chromeControlPathRegex);
         const chromeObserverMatch = pathname.match(chromeObserverPathRegex);
 
         let isAuthenticated = false;
@@ -73,10 +71,6 @@ function initialize(httpServer, config) {
            clientType = 'ChromeObserver';
            connectionKey = chromeObserverMatch[1];
            writeLog(`ChromeObserver client attempting to connect.`);
-        } else if (chromeControlMatch && chromeControlMatch[1]) {
-           clientType = 'ChromeControl';
-           connectionKey = chromeControlMatch[1];
-           writeLog(`Temporary ChromeControl client attempting to connect.`);
         } else {
             writeLog(`WebSocket upgrade request for unhandled path: ${pathname}. Ignoring.`);
             socket.destroy();
@@ -114,14 +108,11 @@ function initialize(httpServer, config) {
                         writeLog(`Warning: ChromeObserver client connected, but module not found or handleNewClient is missing.`);
                         console.log(`[WebSocketServer FORCE LOG] ChromeObserver module not found or handleNewClient is missing.`); // 强制日志
                    }
-                } else if (clientType === 'ChromeControl') {
-                   chromeControlClients.set(clientId, ws);
-                   writeLog(`Temporary ChromeControl client ${clientId} connected.`);
                 } else {
                     clients.set(clientId, ws);
                     writeLog(`Client ${clientId} (Type: ${clientType}) authenticated and connected.`);
                 }
-                
+
                 wssInstance.emit('connection', ws, request);
             });
         }
@@ -149,50 +140,24 @@ function initialize(httpServer, config) {
                 if (ws.clientType === 'DistributedServer') {
                     handleDistributedServerMessage(ws.serverId, parsedMessage);
                 } else if (ws.clientType === 'ChromeObserver') {
-                    // 如果是命令结果，则将其路由回原始的ChromeControl客户端
-                    if (parsedMessage.type === 'command_result' && parsedMessage.data && parsedMessage.data.sourceClientId) {
-                        const sourceClientId = parsedMessage.data.sourceClientId;
-                        
-                        // 为ChromeControl客户端重新构建消息
-                        const resultForClient = {
-                            type: 'command_result',
-                            data: {
-                                requestId: parsedMessage.data.requestId,
-                                status: parsedMessage.data.status,
+                    // 检查是否是命令执行结果
+                    if (parsedMessage.type === 'command_result' && parsedMessage.data && parsedMessage.data.requestId) {
+                        const pendingCommand = pendingChromeCommands.get(parsedMessage.data.requestId);
+                        if (pendingCommand) {
+                            clearTimeout(pendingCommand.timeout);
+                            if (parsedMessage.data.status === 'success') {
+                                // The result from content_script is in the 'message' field
+                                pendingCommand.resolve({ status: 'success', result: parsedMessage.data.result || parsedMessage.data.message });
+                            } else {
+                                pendingCommand.reject(new Error(parsedMessage.data.error || 'Chrome extension returned an error.'));
                             }
-                        };
-                        if (parsedMessage.data.status === 'success') {
-                            // 直接透传 message 字段，保持与 content_script 的一致性
-                            resultForClient.data.message = parsedMessage.data.message;
-                        } else {
-                            resultForClient.data.error = parsedMessage.data.error;
+                            pendingChromeCommands.delete(parsedMessage.data.requestId);
                         }
-
-                        const sent = sendMessageToClient(sourceClientId, resultForClient);
-                        if (!sent) {
-                            writeLog(`Warning: Could not find original ChromeControl client ${sourceClientId} to send command result.`);
-                        }
-                    }
-
-                    // 无论如何，都让ChromeObserver服务插件处理消息（例如，用于更新状态）
-                    const chromeObserverModule = pluginManager.getServiceModule('ChromeObserver');
-                    if (chromeObserverModule && typeof chromeObserverModule.handleClientMessage === 'function') {
-                        // 避免将命令结果再次传递给状态处理器
-                        if (parsedMessage.type !== 'command_result') {
+                    } else {
+                        // 否则，让ChromeObserver服务插件处理其他消息（如pageInfoUpdate）
+                        const chromeObserverModule = pluginManager.getServiceModule('ChromeObserver');
+                        if (chromeObserverModule && typeof chromeObserverModule.handleClientMessage === 'function') {
                             chromeObserverModule.handleClientMessage(ws.clientId, parsedMessage);
-                        }
-                    }
-                } else if (ws.clientType === 'ChromeControl') {
-                    // ChromeControl客户端只应该发送'command'类型的消息
-                    if (parsedMessage.type === 'command') {
-                        const observerClient = Array.from(chromeObserverClients.values())[0]; // 假设只有一个Observer
-                        if (observerClient) {
-                            // 附加源客户端ID以便结果可以被路由回来
-                            parsedMessage.data.sourceClientId = ws.clientId;
-                            observerClient.send(JSON.stringify(parsedMessage));
-                        } else {
-                            // 如果没有找到浏览器插件，立即返回错误
-                            ws.send(JSON.stringify({ type: 'command_result', data: { requestId: parsedMessage.data.requestId, status: 'error', error: 'No active Chrome browser extension found.' }}));
                         }
                     }
                 } else {
@@ -214,9 +179,6 @@ function initialize(httpServer, config) {
             } else if (ws.clientType === 'ChromeObserver') {
               chromeObserverClients.delete(ws.clientId);
               writeLog(`ChromeObserver client ${ws.clientId} disconnected and removed.`);
-           } else if (ws.clientType === 'ChromeControl') {
-              chromeControlClients.delete(ws.clientId);
-              writeLog(`ChromeControl client ${ws.clientId} disconnected and removed.`);
            } else {
                clients.delete(ws.clientId);
            }
@@ -242,7 +204,7 @@ function initialize(httpServer, config) {
 function broadcast(data, targetClientType = null) {
     if (!wssInstance) return;
     const messageString = JSON.stringify(data);
-    
+
     const clientsToBroadcast = new Map([
        ...clients,
        ...Array.from(distributedServers.values()).map(ds => [ds.ws.clientId, ds.ws])
@@ -263,8 +225,7 @@ function sendMessageToClient(clientId, data) {
    // Check all client maps
    const clientWs = clients.get(clientId) ||
                     (Array.from(distributedServers.values()).find(ds => ds.ws.clientId === clientId) || {}).ws ||
-                    chromeObserverClients.get(clientId) ||
-                    chromeControlClients.get(clientId);
+                    chromeObserverClients.get(clientId);
 
     if (clientWs && clientWs.readyState === WebSocket.OPEN) {
         clientWs.send(JSON.stringify(data));
@@ -326,7 +287,7 @@ function handleDistributedServerMessage(serverId, message) {
                    serverName: message.data.serverName || serverId
                };
                distributedServerIPs.set(serverId, ipData);
-               
+
                // 将 serverName 也存储在主连接对象中，以便通过名字查找
                serverInfo.serverName = ipData.serverName;
                distributedServers.set(serverId, serverInfo);
@@ -350,6 +311,34 @@ function handleDistributedServerMessage(serverId, message) {
         default:
             writeLog(`Unknown message type '${message.type}' from server ${serverId}.`);
     }
+}
+
+// --- 新增Chrome命令发送函数 ---
+async function sendCommandToChrome(commandData, timeout = 10000) {
+    const observerClient = Array.from(chromeObserverClients.values())[0]; // 假设只有一个Observer
+    if (!observerClient || observerClient.readyState !== WebSocket.OPEN) {
+        throw new Error('Chrome extension is not connected.');
+    }
+
+    const requestId = commandData.requestId || generateClientId();
+    commandData.requestId = requestId; // 确保命令中有requestId
+
+    const payload = {
+        type: 'command',
+        data: commandData
+    };
+
+    return new Promise((resolve, reject) => {
+        const timeoutId = setTimeout(() => {
+            pendingChromeCommands.delete(requestId);
+            reject(new Error(`Command request to Chrome timed out after ${timeout / 1000}s.`));
+        }, timeout);
+
+        pendingChromeCommands.set(requestId, { resolve, reject, timeout: timeoutId });
+
+        observerClient.send(JSON.stringify(payload));
+        writeLog(`Sent command request ${requestId} to Chrome client ${observerClient.clientId}.`);
+    });
 }
 
 async function executeDistributedTool(serverIdOrName, toolName, toolArgs, timeout) {
@@ -411,6 +400,7 @@ module.exports = {
     setPluginManager,
     broadcast,
     sendMessageToClient,
+    sendCommandToChrome, // 导出新函数
     executeDistributedTool,
     findServerByIp,
     shutdown
