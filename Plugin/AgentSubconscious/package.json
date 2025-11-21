@@ -1,0 +1,16 @@
+{
+  "name": "agent-subconscious",
+  "version": "1.0.0",
+  "description": "Agent Subconscious Dreaming Service",
+  "main": "AgentSubconscious.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "System",
+  "license": "ISC",
+  "dependencies": {
+    "axios": "^1.6.0",
+    "dayjs": "^1.11.10",
+    "node-schedule": "^2.1.1"
+  }
+}
