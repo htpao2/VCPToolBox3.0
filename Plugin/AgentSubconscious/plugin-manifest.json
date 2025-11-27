@@ -1,0 +1,30 @@
+{
+  "manifestVersion": "1.0.0",
+  "name": "AgentSubconscious",
+  "displayName": "AI潜意识",
+  "version": "1.0.0",
+  "description": "为AI提供潜意识思考循环。当系统空闲时，它会基于记忆（DailyNotes）进行反思、梦境生成，并在产生重要洞察时主动唤醒主Agent与用户沟通。",
+  "author": "System",
+  "pluginType": "service",
+  "entryPoint": {
+    "script": "AgentSubconscious.js"
+  },
+  "communication": {
+    "protocol": "direct"
+  },
+  "configSchema": {
+    "DREAM_INTERVAL_CRON": "string",
+    "DREAM_AGENT_NAME": "string",
+    "DREAM_MEMORY_LOOKBACK_DAYS": "integer",
+    "DREAM_MODEL_ID": "string"
+  },
+  "pluginSpecificEnvConfig": {
+    "DREAM_INTERVAL_CRON": "0 3 * * *",
+    "DREAM_AGENT_NAME": "小娜",
+    "DREAM_MEMORY_LOOKBACK_DAYS": "3",
+    "DREAM_MODEL_ID": "gemini-pro"
+  },
+  "capabilities": {
+    "invocationCommands": []
+  }
+}
