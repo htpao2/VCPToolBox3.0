@@ -1,11 +1,11 @@
 {
   "name": "roo-code-adapter",
   "version": "1.0.0",
-  "description": "Adapter to make Roo Code Extension talk to VCP",
   "main": "adapter_server.js",
   "dependencies": {
     "express": "^4.18.2",
+    "node-fetch": "^2.7.0",
     "body-parser": "^1.20.2",
-    "axios": "^1.6.0"
+    "cors": "^2.8.5"
   }
 }

@@ -1,142 +1,164 @@
 const express = require('express');
+const fetch = require('node-fetch');
 const bodyParser = require('body-parser');
-const axios = require('axios');
-const fs = require('fs');
-const path = require('path');
+const cors = require('cors');
 
 const app = express();
-const PORT = process.env.PORT || 3001;
-const VCP_TARGET = process.env.VCP_TARGET || 'http://localhost:3000';
+const PORT = process.env.ADAPTER_PORT || 3001;
+const VCP_API_URL = process.env.VCP_SERVER_URL || 'http://localhost:3000/v1';
 
+app.use(cors());
 app.use(bodyParser.json({ limit: '50mb' }));
 
-// VCP Tool Regex
-const TOOL_REQUEST_REGEX = /<<<\[TOOL_REQUEST\]>>>([\s\S]*?)<<<\[END_TOOL_REQUEST\]>>>/;
+// --- Helper: Convert VCP Tool Call to Roo Code XML ---
+function convertVCPToolToXML(content) {
+    if (!content) return content;
 
-function convertToRooXML(vcpResponse) {
-    const match = vcpResponse.match(TOOL_REQUEST_REGEX);
-    if (match) {
-        try {
-            const jsonStr = match[1];
-            const toolCall = JSON.parse(jsonStr);
-            const { commandIdentifier, ...args } = toolCall;
+    // Pattern for VCP Tool Request
+    // <<<[TOOL_REQUEST]>>>
+    // tool_name:「始」Name「末」,
+    // param:「始」Value「末」,
+    // ...
+    // <<<[END_TOOL_REQUEST]>>>
 
-            // Roo Code expects: <tool_code>...</tool_code>
-            // Actually, Roo Code (OpenAI provider) expects tool_calls array in JSON if using native tools,
-            // OR if using "System Prompt" approach, it expects XML tags in the text.
-            // Based on user request "show effects in Roo", and "Roo uses XML", we assume XML format.
-            // Format: <tool_code>\n<tool_name>name</tool_name>\n<parameters>\n...</parameters>\n</tool_code>
-            // Wait, standard Roo Code tool use format is:
-            // <tool_code>
-            //   tool_name
-            //   <parameter_name>value</parameter_name>
-            // </tool_code>
-            // Let's stick to the standard Roo XML format.
+    const toolRegex = /<<<\[TOOL_REQUEST\]>>>([\s\S]*?)<<<\[END_TOOL_REQUEST\]>>>/g;
+    let convertedContent = content;
+    let match;
+    const replacements = [];
 
-            const escapeXml = (unsafe) => {
-                if (typeof unsafe !== 'string') return unsafe;
-                return unsafe.replace(/[<>&'"]/g, c => {
-                    switch (c) {
-                        case '<': return '&lt;';
-                        case '>': return '&gt;';
-                        case '&': return '&amp;';
-                        case '\'': return '&apos;';
-                        case '"': return '&quot;';
-                    }
-                });
-            };
+    while ((match = toolRegex.exec(content)) !== null) {
+        const fullBlock = match[0];
+        const body = match[1];
 
-            let xml = `<tool_code>\n${commandIdentifier}\n`;
-            for (const [key, value] of Object.entries(args)) {
-                xml += `<${key}>${escapeXml(value)}</${key}>\n`;
+        // Parse parameters: key:「始」value「末」,
+        const paramRegex = /([a-zA-Z0-9_]+):「始」([\s\S]*?)「末」/g;
+        let paramMatch;
+        const params = {};
+
+        while ((paramMatch = paramRegex.exec(body)) !== null) {
+            params[paramMatch[1]] = paramMatch[2];
+        }
+
+        const toolName = params.tool_name;
+        const commandIdentifier = params.commandIdentifier;
+
+        if (toolName === 'RooCodeTools' && commandIdentifier) {
+            let xml = `<${commandIdentifier}>\n`;
+            for (const [key, value] of Object.entries(params)) {
+                if (key === 'tool_name' || key === 'commandIdentifier') continue;
+                xml += `<${key}>${value}</${key}>\n`;
             }
-            xml += `</tool_code>`;
+            xml += `</${commandIdentifier}>`;
 
-            // Replace the VCP block with XML block
-            return vcpResponse.replace(match[0], xml);
-        } catch (e) {
-            console.error("Failed to parse tool call:", e);
-            return vcpResponse; // Return original if parse fails
+            replacements.push({
+                start: match.index,
+                end: match.index + fullBlock.length,
+                text: xml
+            });
         }
     }
-    return vcpResponse;
+
+    // Apply replacements in reverse order
+    for (let i = replacements.length - 1; i >= 0; i--) {
+        const rep = replacements[i];
+        convertedContent = convertedContent.substring(0, rep.start) + rep.text + convertedContent.substring(rep.end);
+    }
+
+    return convertedContent;
 }
 
+// --- Proxy Route ---
+
 app.post('/v1/chat/completions', async (req, res) => {
-    console.log("Received request from Roo Code Client");
-
-    // 1. Intercept Request
-    const upstreamReq = { ...req.body };
-
-    // Disable streaming for translation purposes
-    // (Translating a stream on the fly is hard, so we buffer)
-    upstreamReq.stream = false;
-
-    // TODO: Inject VCP System Prompt if needed?
-    // Roo sends its own huge system prompt. If we replace it, we might break Roo's context.
-    // But the user said: "Updated Roo Code System Prompts" is one of the goals.
-    // If we want the model to use VCP format, we MUST inject instructions to do so.
-    // However, if we just want to translate, maybe we let Roo send its XML instructions,
-    // and we let the model output XML, and we just pass it through?
-    // User said: "AI uses VCP format calls... in Roo also show VCP format... but effect like Roo Code".
-    // Wait, "In Roo also show VCP format".
-    // If Roo shows VCP format (<<<...>>>), the Roo Extension won't parse it as a tool call!
-    // Unless we assume the User *wants* to see the raw text, and *then* the adapter converts it invisibly?
-    // But if the Adapter converts it to XML for the *Extension to execute*, the Extension will see XML in the response content.
-
-    // Let's stick to the Adapter Plan:
-    // 1. We append a small instruction to the system prompt: "IMPORTANT: You are running in VCP mode. Please output tool calls in VCP format <<<[TOOL_REQUEST]>>>...".
-    // 2. Model outputs VCP format.
-    // 3. Adapter captures output.
-    // 4. Adapter translates VCP format to XML format so Roo Client can execute it.
-
-    if (upstreamReq.messages && upstreamReq.messages.length > 0) {
-        const sysMsg = upstreamReq.messages.find(m => m.role === 'system');
-        if (sysMsg) {
-            sysMsg.content += "\n\nIMPORTANT: Please output tool calls using the following format:\n<<<[TOOL_REQUEST]>>>\n{\"commandIdentifier\": \"tool_name\", ...args}\n<<<[END_TOOL_REQUEST]>>>\n";
-        }
-    }
-
     try {
-        const response = await axios.post(`${VCP_TARGET}/v1/chat/completions`, upstreamReq, {
-            headers: { 'Content-Type': 'application/json' }
+        console.log(`[RooAdapter] Forwarding request to ${VCP_API_URL}/chat/completions`);
+
+        // IMPORTANT: We force 'stream: false' to the upstream VCP server to ensure
+        // we get the full response payload. This allows us to reliably parse and translate
+        // the VCP tool call block (which might be split across chunks in a stream)
+        // into valid XML for Roo Code.
+        const originalBody = req.body;
+        const upstreamBody = { ...originalBody, stream: false };
+
+        const vcpResponse = await fetch(VCP_API_URL + '/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': req.headers.authorization || ''
+            },
+            body: JSON.stringify(upstreamBody)
         });
 
-        const vcpData = response.data;
-        let content = vcpData.choices[0].message.content;
+        if (!vcpResponse.ok) {
+            const errText = await vcpResponse.text();
+            return res.status(vcpResponse.status).send(errText);
+        }
 
-        // Translate
-        const translatedContent = convertToRooXML(content);
+        const data = await vcpResponse.json();
 
-        // Construct response compatible with OpenAI/Roo
-        const translatedResponse = {
-            ...vcpData,
-            choices: [
-                {
-                    ...vcpData.choices[0],
-                    message: {
-                        ...vcpData.choices[0].message,
-                        content: translatedContent
-                    }
-                }
-            ]
-        };
+        // Perform Translation
+        if (data.choices && data.choices[0] && data.choices[0].message) {
+            const originalContent = data.choices[0].message.content || '';
+            const translatedContent = convertVCPToolToXML(originalContent);
+            data.choices[0].message.content = translatedContent;
+        }
 
-        // If the original request asked for stream, we can simulate a stream
-        // But for simplicity, we return non-streamed JSON.
-        // Roo Code usually handles non-streamed responses fine.
-        res.json(translatedResponse);
+        // If the client requested streaming, we need to fake a stream response
+        // because Roo Code expects SSE if it asked for it.
+        if (originalBody.stream) {
+            res.setHeader('Content-Type', 'text/event-stream');
+            res.setHeader('Cache-Control', 'no-cache');
+            res.setHeader('Connection', 'keep-alive');
+
+            const content = data.choices[0].message.content;
+            const model = data.model;
+            const id = data.id;
+
+            // Send the entire content in one chunk (simplified streaming)
+            const chunk = {
+                id: id,
+                object: 'chat.completion.chunk',
+                created: Date.now(),
+                model: model,
+                choices: [{
+                    index: 0,
+                    delta: { content: content },
+                    finish_reason: null
+                }]
+            };
+
+            res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+
+            // Send finish chunk
+            const finishChunk = {
+                id: id,
+                object: 'chat.completion.chunk',
+                created: Date.now(),
+                model: model,
+                choices: [{
+                    index: 0,
+                    delta: {},
+                    finish_reason: 'stop'
+                }]
+            };
+            res.write(`data: ${JSON.stringify(finishChunk)}\n\n`);
+            res.write('data: [DONE]\n\n');
+            res.end();
+
+        } else {
+            // Standard JSON response
+            res.json(data);
+        }
 
     } catch (error) {
-        console.error("Upstream error:", error.message);
-        if (error.response) {
-            res.status(error.response.status).json(error.response.data);
-        } else {
-            res.status(500).json({ error: "Internal Adapter Error" });
-        }
+        console.error('[RooAdapter] Error:', error);
+        res.status(500).json({ error: error.message });
     }
 });
 
+// Start Server
 app.listen(PORT, () => {
-    console.log(`RooCodeAdapter listening on port ${PORT}`);
+    console.log(`[RooAdapter] Service running on port ${PORT}`);
+    console.log(`[RooAdapter] Target VCP URL: ${VCP_API_URL}`);
+    console.log(`[RooAdapter] Point your Roo Code Extension to http://localhost:${PORT}/v1`);
 });

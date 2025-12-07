@@ -1,232 +1,87 @@
 {
+  "manifestVersion": "1.0.0",
   "name": "RooCodeTools",
   "version": "1.0.0",
-  "type": "synchronous",
-  "description": "Provides the complete toolset from Roo Code (file ops, diffs, browser, etc.) adapted for VCP.",
-  "entry": "index.mjs",
-  "tools": [
-    {
-      "name": "execute_command",
-      "description": "Execute a CLI command on the system. Use with caution. Requires admin approval for sensitive commands.",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "command": {
-            "type": "string",
-            "description": "The command to execute"
-          },
-          "requireAdmin": {
-            "type": "string",
-            "description": "The admin code if required (not used by the LLM, but by the system)"
-          }
-        },
-        "required": ["command"]
+  "displayName": "Roo Code Tools",
+  "description": "Port of Roo Code's powerful toolset including file operations, diff application, and browser automation.",
+  "author": "RooCode Integration",
+  "pluginType": "synchronous",
+  "requiresAdmin": true,
+  "entryPoint": {
+    "type": "nodejs",
+    "command": "node index.mjs"
+  },
+  "communication": {
+    "protocol": "stdio",
+    "timeout": 300000
+  },
+  "capabilities": {
+    "invocationCommands": [
+      {
+        "commandIdentifier": "execute_command",
+        "description": "Description: Request to execute a CLI command on the system. Use this when you need to perform system operations or run specific commands to accomplish any step in the user's task. You must tailor your command to the user's system and provide a clear explanation of what the command does. For command chaining, use the appropriate chaining syntax for the user's shell. Prefer to execute complex CLI commands over creating executable scripts, as they are more flexible and easier to run. Prefer relative commands and paths that avoid location sensitivity for terminal consistency, e.g: `touch ./testdata/example.file`, `dir ./examples/model1/data/yaml`, or `go test ./cmd/front --config ./cmd/front/config.yml`. If directed by the user, you may open a terminal in a different directory by using the `cwd` parameter.\nParameters:\n- command: (required) The CLI command to execute. This should be valid for the current operating system. Ensure the command is properly formatted and does not contain any harmful instructions.\n- cwd: (optional) The working directory to execute the command in\n- requireAdmin: (required) Authentication code for executing system commands.\nUsage:\n<<<[TOOL_REQUEST]>>>\ntool_name:「始」RooCodeTools「末」,\ncommandIdentifier:「始」execute_command「末」,\ncommand:「始」npm run dev「末」,\ncwd:「始」./project「末」,\nrequireAdmin:「始」123456「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\ntool_name:「始」RooCodeTools「末」,\ncommandIdentifier:「始」execute_command「末」,\ncommand:「始」ls -la「末」,\nrequireAdmin:「始」123456「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "commandIdentifier": "read_file",
+        "description": "Description: Request to read the contents of a file. The tool outputs content for easy reference when creating diffs or discussing code. Supports text extraction from PDF and DOCX files, but may not handle other binary files properly.\nParameters:\n- path: (required) File path (relative to workspace directory)\nUsage:\n<<<[TOOL_REQUEST]>>>\ntool_name:「始」RooCodeTools「末」,\ncommandIdentifier:「始」read_file「末」,\npath:「始」src/app.ts「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\ntool_name:「始」RooCodeTools「末」,\ncommandIdentifier:「始」read_file「末」,\npath:「始」package.json「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "commandIdentifier": "write_to_file",
+        "description": "Description: Request to write content to a file. This tool is primarily used for **creating new files** or for scenarios where a **complete rewrite of an existing file is intentionally required**. If the file exists, it will be overwritten. If it doesn't exist, it will be created. This tool will automatically create any directories needed to write the file.\nParameters:\n- path: (required) The path of the file to write to\n- content: (required) The content to write to the file. ALWAYS provide the COMPLETE intended content of the file.\nUsage:\n<<<[TOOL_REQUEST]>>>\ntool_name:「始」RooCodeTools「末」,\ncommandIdentifier:「始」write_to_file「末」,\npath:「始」config.json「末」,\ncontent:「始」{\"key\": \"value\"}「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\ntool_name:「始」RooCodeTools「末」,\ncommandIdentifier:「始」write_to_file「末」,\npath:「始」hello.txt「末」,\ncontent:「始」Hello World「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "commandIdentifier": "apply_diff",
+        "description": "Description: Request to apply PRECISE, TARGETED modifications to an existing file by searching for specific sections of content and replacing them. This tool is for SURGICAL EDITS ONLY - specific changes to existing code.\nYou can perform multiple distinct search and replace operations within a single `apply_diff` call by providing multiple SEARCH/REPLACE blocks in the `diff` parameter.\nThe SEARCH section must exactly match existing content including whitespace and indentation.\nParameters:\n- path: (required) The path of the file to modify\n- diff: (required) The search/replace block defining the changes.\nDiff format:\n```\n<<<<<<< SEARCH\n:start_line: (optional) The line number of original content where the search block starts.\n-------\n[exact content to find including whitespace]\n=======\n[new content to replace with]\n>>>>>>> REPLACE\n```\nUsage:\n<<<[TOOL_REQUEST]>>>\ntool_name:「始」RooCodeTools「末」,\ncommandIdentifier:「始」apply_diff「末」,\npath:「始」src/utils.js「末」,\ndiff:「始」<<<<<<< SEARCH\n...\n>>>>>>> REPLACE「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\ntool_name:「始」RooCodeTools「末」,\ncommandIdentifier:「始」apply_diff「末」,\npath:「始」main.py「末」,\ndiff:「始」<<<<<<< SEARCH\nprint(\"old\")\n=======\nprint(\"new\")\n>>>>>>> REPLACE「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "commandIdentifier": "search_files",
+        "description": "Description: Request to perform a regex search across files in a specified directory, providing context-rich results.\nParameters:\n- path: (required) The path of the directory to search in\n- regex: (required) The regular expression pattern to search for\n- file_pattern: (optional) Glob pattern to filter files (e.g., '*.ts')\nUsage:\n<<<[TOOL_REQUEST]>>>\ntool_name:「始」RooCodeTools「末」,\ncommandIdentifier:「始」search_files「末」,\npath:「始」.「末」,\nregex:「始」TODO「末」,\nfile_pattern:「始」*.js「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\ntool_name:「始」RooCodeTools「末」,\ncommandIdentifier:「始」search_files「末」,\npath:「始」src「末」,\nregex:「始」function\\s+\\w+「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "commandIdentifier": "list_files",
+        "description": "Description: Request to list files and directories within the specified directory. If recursive is true, it will list all files and directories recursively.\nParameters:\n- path: (required) The path of the directory to list contents for\n- recursive: (optional) Whether to list files recursively (true/false)\nUsage:\n<<<[TOOL_REQUEST]>>>\ntool_name:「始」RooCodeTools「末」,\ncommandIdentifier:「始」list_files「末」,\npath:「始」.「末」,\nrecursive:「始」true「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\ntool_name:「始」RooCodeTools「末」,\ncommandIdentifier:「始」list_files「末」,\npath:「始」src/components「末」,\nrecursive:「始」false「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "commandIdentifier": "list_code_definition_names",
+        "description": "Description: Request to list definition names (classes, functions, methods, etc.) from source code. This tool can analyze either a single file or all files at the top level of a specified directory.\nParameters:\n- path: (required) The path of the file or directory to analyze.\nUsage:\n<<<[TOOL_REQUEST]>>>\ntool_name:「始」RooCodeTools「末」,\ncommandIdentifier:「始」list_code_definition_names「末」,\npath:「始」src/main.ts「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\ntool_name:「始」RooCodeTools「末」,\ncommandIdentifier:「始」list_code_definition_names「末」,\npath:「始」src/「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "commandIdentifier": "browser_action",
+        "description": "Description: Request to interact with a Puppeteer-controlled browser.\nParameters:\n- action: (required) launch, hover, click, type, press, resize, scroll_down, scroll_up, close\n- url: (optional) URL for launch\n- coordinate: (optional) x,y@widthxheight for click/hover\n- text: (optional) Text for type/press\n- size: (optional) width,height for resize\nUsage:\n<<<[TOOL_REQUEST]>>>\ntool_name:「始」RooCodeTools「末」,\ncommandIdentifier:「始」browser_action「末」,\naction:「始」launch「末」,\nurl:「始」https://google.com「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\ntool_name:「始」RooCodeTools「末」,\ncommandIdentifier:「始」browser_action「末」,\naction:「始」click「末」,\ncoordinate:「始」450,300@1024x768「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "commandIdentifier": "ask_followup_question",
+        "description": "Description: Ask the user a question to gather additional information.\nParameters:\n- question: (required) The question\nUsage:\n<<<[TOOL_REQUEST]>>>\ntool_name:「始」RooCodeTools「末」,\ncommandIdentifier:「始」ask_followup_question「末」,\nquestion:「始」What is the file path?「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\ntool_name:「始」RooCodeTools「末」,\ncommandIdentifier:「始」ask_followup_question「末」,\nquestion:「始」Do you want to continue?「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "commandIdentifier": "attempt_completion",
+        "description": "Description: Use this tool to present the result of your work to the user.\nParameters:\n- result: (required) The final result description\nUsage:\n<<<[TOOL_REQUEST]>>>\ntool_name:「始」RooCodeTools「末」,\ncommandIdentifier:「始」attempt_completion「末」,\nresult:「始」Task completed.「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\ntool_name:「始」RooCodeTools「末」,\ncommandIdentifier:「始」attempt_completion「末」,\nresult:「始」I have updated the files.「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "commandIdentifier": "switch_mode",
+        "description": "Description: Request to switch to a different mode (e.g., Code, Architect, Ask). Use this when the current task requires a different persona or capability set.\nParameters:\n- mode: (required) The mode to switch to (code, architect, ask)\n- reason: (optional) The reason for switching mode\nUsage:\n<<<[TOOL_REQUEST]>>>\ntool_name:「始」RooCodeTools「末」,\ncommandIdentifier:「始」switch_mode「末」,\nmode:「始」architect「末」,\nreason:「始」Need to design the system first「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\ntool_name:「始」RooCodeTools「末」,\ncommandIdentifier:「始」switch_mode「末」,\nmode:「始」code「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "commandIdentifier": "new_task",
+        "description": "Description: Request to start a new task. This clears the current task context and todo list, allowing for a fresh start.\nParameters:\n- mode: (required) The mode to start the new task in\n- message: (required) The initial message or instruction for the new task\nUsage:\n<<<[TOOL_REQUEST]>>>\ntool_name:「始」RooCodeTools「末」,\ncommandIdentifier:「始」new_task「末」,\nmode:「始」code「末」,\nmessage:「始」Create a new React app「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\ntool_name:「始」RooCodeTools「末」,\ncommandIdentifier:「始」new_task「末」,\nmode:「始」code「末」,\nmessage:「始」Refactor the database「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "commandIdentifier": "update_todo_list",
+        "description": "Description: Request to update the todo list for the current task. Use this to track progress, subtasks, and pending items. The todo list is persisted in the workspace.\nParameters:\n- todo: (required) The updated todo list content (string or JSON structure)\nUsage:\n<<<[TOOL_REQUEST]>>>\ntool_name:「始」RooCodeTools「末」,\ncommandIdentifier:「始」update_todo_list「末」,\ntodo:「始」- [x] Analyze code\n- [ ] Implement feature\n- [ ] Test「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\ntool_name:「始」RooCodeTools「末」,\ncommandIdentifier:「始」update_todo_list「末」,\ntodo:「始」1. Step one\n2. Step two「末」\n<<<[END_TOOL_REQUEST]>>>"
       }
-    },
-    {
-      "name": "read_file",
-      "description": "Read the contents of a file.",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "path": {
-            "type": "string",
-            "description": "The path to the file"
-          }
-        },
-        "required": ["path"]
-      }
-    },
-    {
-      "name": "write_to_file",
-      "description": "Write content to a file. Overwrites existing content.",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "path": {
-            "type": "string",
-            "description": "The path to the file"
-          },
-          "content": {
-            "type": "string",
-            "description": "The content to write"
-          }
-        },
-        "required": ["path", "content"]
-      }
-    },
-    {
-      "name": "apply_diff",
-      "description": "Apply a search-and-replace diff to a file. Use exact string matching for SEARCH block.",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "path": {
-            "type": "string",
-            "description": "The path to the file"
-          },
-          "diff": {
-            "type": "string",
-            "description": "The diff content containing <<<<<<< SEARCH, =======, and >>>>>>> REPLACE"
-          }
-        },
-        "required": ["path", "diff"]
-      }
-    },
-    {
-      "name": "search_files",
-      "description": "Search for files using a regex pattern.",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "path": {
-            "type": "string",
-            "description": "The directory to search in"
-          },
-          "regex": {
-            "type": "string",
-            "description": "The regex pattern to match filenames or content"
-          }
-        },
-        "required": ["path", "regex"]
-      }
-    },
-    {
-      "name": "list_files",
-      "description": "List files in a directory.",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "path": {
-            "type": "string",
-            "description": "The directory path"
-          },
-          "recursive": {
-            "type": "boolean",
-            "description": "Whether to list recursively"
-          }
-        },
-        "required": ["path"]
-      }
-    },
-    {
-      "name": "list_code_definition_names",
-      "description": "List code definitions (classes, functions) in a directory.",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "path": {
-            "type": "string",
-            "description": "The directory path"
-          }
-        },
-        "required": ["path"]
-      }
-    },
-    {
-      "name": "browser_action",
-      "description": "Perform a browser action (launch, click, type, etc.).",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "action": {
-            "type": "string",
-            "enum": ["launch", "click", "type", "scroll", "close", "goto", "screenshot"],
-            "description": "The action to perform"
-          },
-          "url": {
-            "type": "string",
-            "description": "URL to visit (for launch/goto)"
-          },
-          "selector": {
-            "type": "string",
-            "description": "CSS selector for click/type"
-          },
-          "text": {
-            "type": "string",
-            "description": "Text to type"
-          }
-        },
-        "required": ["action"]
-      }
-    },
-    {
-      "name": "ask_followup_question",
-      "description": "Ask the user a question.",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "question": {
-            "type": "string",
-            "description": "The question to ask"
-          }
-        },
-        "required": ["question"]
-      }
-    },
-    {
-      "name": "attempt_completion",
-      "description": "Signal that the task is complete.",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "result": {
-            "type": "string",
-            "description": "The result of the task"
-          },
-          "command": {
-            "type": "string",
-            "description": "Optional command to demonstrate the result"
-          }
-        },
-        "required": ["result"]
-      }
-    },
-    {
-      "name": "switch_mode",
-      "description": "Switch the agent mode (e.g., Code, Architect, Ask).",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "mode": {
-            "type": "string",
-            "description": "The mode to switch to"
-          }
-        },
-        "required": ["mode"]
-      }
-    },
-    {
-      "name": "new_task",
-      "description": "Start a new task with a specific mode and initial message.",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "mode": {
-            "type": "string",
-            "description": "The mode for the new task"
-          },
-          "message": {
-            "type": "string",
-            "description": "The initial message/instruction"
-          }
-        },
-        "required": ["mode", "message"]
-      }
-    },
-    {
-      "name": "update_todo_list",
-      "description": "Update the persistent TODO list for the project.",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "todo": {
-            "type": "string",
-            "description": "The markdown content of the TODO list"
-          }
-        },
-        "required": ["todo"]
-      }
-    }
-  ]
+    ]
+  }
 }
