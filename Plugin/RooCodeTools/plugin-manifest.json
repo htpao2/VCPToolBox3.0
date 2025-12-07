@@ -66,6 +66,21 @@
         "commandIdentifier": "attempt_completion",
         "description": "Description: Use this tool to present the result of your work to the user.\nParameters:\n- result: (required) The final result description\nUsage:\n<<<[TOOL_REQUEST]>>>\ntool_name:「始」RooCodeTools「末」,\ncommandIdentifier:「始」attempt_completion「末」,\nresult:「始」Task completed.「末」\n<<<[END_TOOL_REQUEST]>>>",
         "example": "<<<[TOOL_REQUEST]>>>\ntool_name:「始」RooCodeTools「末」,\ncommandIdentifier:「始」attempt_completion「末」,\nresult:「始」I have updated the files.「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "commandIdentifier": "switch_mode",
+        "description": "Description: Request to switch to a different mode (e.g., Code, Architect, Ask). Use this when the current task requires a different persona or capability set.\nParameters:\n- mode: (required) The mode to switch to (code, architect, ask)\n- reason: (optional) The reason for switching mode\nUsage:\n<<<[TOOL_REQUEST]>>>\ntool_name:「始」RooCodeTools「末」,\ncommandIdentifier:「始」switch_mode「末」,\nmode:「始」architect「末」,\nreason:「始」Need to design the system first「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\ntool_name:「始」RooCodeTools「末」,\ncommandIdentifier:「始」switch_mode「末」,\nmode:「始」code「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "commandIdentifier": "new_task",
+        "description": "Description: Request to start a new task. This clears the current task context and todo list, allowing for a fresh start.\nParameters:\n- mode: (required) The mode to start the new task in\n- message: (required) The initial message or instruction for the new task\nUsage:\n<<<[TOOL_REQUEST]>>>\ntool_name:「始」RooCodeTools「末」,\ncommandIdentifier:「始」new_task「末」,\nmode:「始」code「末」,\nmessage:「始」Create a new React app「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\ntool_name:「始」RooCodeTools「末」,\ncommandIdentifier:「始」new_task「末」,\nmode:「始」code「末」,\nmessage:「始」Refactor the database「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "commandIdentifier": "update_todo_list",
+        "description": "Description: Request to update the todo list for the current task. Use this to track progress, subtasks, and pending items. The todo list is persisted in the workspace.\nParameters:\n- todo: (required) The updated todo list content (string or JSON structure)\nUsage:\n<<<[TOOL_REQUEST]>>>\ntool_name:「始」RooCodeTools「末」,\ncommandIdentifier:「始」update_todo_list「末」,\ntodo:「始」- [x] Analyze code\n- [ ] Implement feature\n- [ ] Test「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\ntool_name:「始」RooCodeTools「末」,\ncommandIdentifier:「始」update_todo_list「末」,\ntodo:「始」1. Step one\n2. Step two「末」\n<<<[END_TOOL_REQUEST]>>>"
       }
     ]
   }

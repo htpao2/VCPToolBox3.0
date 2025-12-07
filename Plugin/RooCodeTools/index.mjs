@@ -404,6 +404,43 @@ async function attempt_completion(args) {
     return { success: true, result: `[Task Completed]: ${args.result}` };
 }
 
+async function switch_mode(args) {
+    if (args.commandIdentifier !== 'switch_mode') return null;
+    // Roo Code switches mode internally. Here we acknowledge it to the context.
+    return {
+        success: true,
+        result: `Switched to ${args.mode} mode. ${args.reason ? `Reason: ${args.reason}` : ''}\nI will now adopt the ${args.mode} persona.`
+    };
+}
+
+async function update_todo_list(args) {
+    if (args.commandIdentifier !== 'update_todo_list') return null;
+    const todoPath = getAbsolutePath('.roo_todo.json');
+    try {
+        await fs.writeJson(todoPath, { todo: args.todo }, { spaces: 2 });
+        return { success: true, result: "Todo list updated." };
+    } catch (error) {
+        return { success: false, error: `Failed to update todo list: ${error.message}` };
+    }
+}
+
+async function new_task(args) {
+    if (args.commandIdentifier !== 'new_task') return null;
+    const todoPath = getAbsolutePath('.roo_todo.json');
+    try {
+        // Reset todo list
+        if (await fs.pathExists(todoPath)) {
+             await fs.remove(todoPath);
+        }
+        return {
+            success: true,
+            result: `New task started in ${args.mode} mode.\nMessage: ${args.message}\nContext and todo list have been reset.`
+        };
+    } catch (error) {
+        return { success: false, error: `Failed to start new task: ${error.message}` };
+    }
+}
+
 
 // --- Main Handler ---
 
@@ -441,7 +478,10 @@ async function main() {
                 list_code_definition_names,
                 browser_action,
                 ask_followup_question,
-                attempt_completion
+                attempt_completion,
+                switch_mode,
+                update_todo_list,
+                new_task
             ];
 
             let handled = false;
