@@ -55,6 +55,7 @@ function initialize(httpServer, config) {
         const chromeControlPathRegex = /^\/vcp-chrome-control\/VCP_Key=(.+)$/;
         const chromeObserverPathRegex = /^\/vcp-chrome-observer\/VCP_Key=(.+)$/;
         const adminPanelPathRegex = /^\/vcp-admin-panel\/VCP_Key=(.+)$/; // 新增
+        const desktopClientPathRegex = /^\/vcp-desktop-client\/VCP_Key=(.+)$/; // 新增：DesktopClient
 
         const vcpMatch = pathname.match(vcpLogPathRegex);
         const vcpInfoMatch = pathname.match(vcpInfoPathRegex); // 新增匹配
@@ -62,6 +63,7 @@ function initialize(httpServer, config) {
         const chromeControlMatch = pathname.match(chromeControlPathRegex);
         const chromeObserverMatch = pathname.match(chromeObserverPathRegex);
         const adminPanelMatch = pathname.match(adminPanelPathRegex); // 新增
+        const desktopClientMatch = pathname.match(desktopClientPathRegex); // 新增
 
         let isAuthenticated = false;
         let clientType = null;
@@ -91,6 +93,10 @@ function initialize(httpServer, config) {
             clientType = 'AdminPanel';
             connectionKey = adminPanelMatch[1];
             writeLog(`Admin Panel client attempting to connect.`);
+        } else if (desktopClientMatch && desktopClientMatch[1]) {
+            clientType = 'DesktopClient';
+            connectionKey = desktopClientMatch[1];
+            writeLog(`Desktop Client attempting to connect.`);
         } else {
             writeLog(`WebSocket upgrade request for unhandled path: ${pathname}. Ignoring.`);
             socket.destroy();
@@ -120,11 +126,11 @@ function initialize(httpServer, config) {
                     console.log(`[WebSocketServer FORCE LOG] A client with type 'ChromeObserver' (ID: ${clientId}) has connected.`); // 强制日志
                    chromeObserverClients.set(clientId, ws); // 将客户端存入Map
                    writeLog(`ChromeObserver client ${clientId} connected and stored.`);
-                   
+
                    // 优先尝试 ChromeBridge，回退到 ChromeObserver
                    const chromeBridgeModule = pluginManager.getServiceModule('ChromeBridge');
                    const chromeObserverModule = pluginManager.getServiceModule('ChromeObserver');
-                   
+
                    if (chromeBridgeModule && typeof chromeBridgeModule.handleNewClient === 'function') {
                        console.log(`[WebSocketServer] ✅ Found ChromeBridge module. Calling handleNewClient...`);
                        chromeBridgeModule.handleNewClient(ws);
@@ -141,11 +147,22 @@ function initialize(httpServer, config) {
                 } else if (clientType === 'AdminPanel') {
                    adminPanelClients.set(clientId, ws);
                    writeLog(`Admin Panel client ${clientId} connected.`);
+                } else if (clientType === 'DesktopClient') {
+                   // 桌面客户端连接处理
+                   // 不需要专门的 Map 存储，因为 DesktopBridge 插件会自己管理 (handleNewClient)
+                   // 但如果需要 server 级别的追踪，可以加一个 map
+                   // 这里直接交给插件
+                   const desktopBridgeModule = pluginManager.getServiceModule('DesktopBridge');
+                   if (desktopBridgeModule && typeof desktopBridgeModule.handleNewClient === 'function') {
+                       desktopBridgeModule.handleNewClient(ws);
+                   } else {
+                       writeLog(`Warning: DesktopClient connected, but DesktopBridge module not found.`);
+                   }
                 } else {
                     clients.set(clientId, ws);
                     writeLog(`Client ${clientId} (Type: ${clientType}) authenticated and connected.`);
                 }
-                
+
                 wssInstance.emit('connection', ws, request);
             });
         }
@@ -166,15 +183,15 @@ function initialize(httpServer, config) {
 
         ws.on('message', (message) => {
             const messageString = message.toString();
-            
+
             try {
                 const parsedMessage = JSON.parse(message);
-                
+
                 // 强制日志：ChromeObserver 的消息
                 if (ws.clientType === 'ChromeObserver') {
                     console.log(`[WebSocketServer] 📨 收到 ChromeObserver 消息，类型: ${parsedMessage.type}`);
                 }
-                
+
                 if (serverConfig.debugMode) {
                     console.log(`[WebSocketServer] Received message from ${ws.clientId} (${ws.clientType}): ${messageString.substring(0, 300)}...`);
                 }
@@ -190,7 +207,7 @@ function initialize(httpServer, config) {
                     } else if (parsedMessage.type === 'command_result' && parsedMessage.data && parsedMessage.data.sourceClientId) {
                         // 如果是命令结果，则将其路由回原始的ChromeControl客户端
                         const sourceClientId = parsedMessage.data.sourceClientId;
-                        
+
                         // 为ChromeControl客户端重新构建消息
                         const resultForClient = {
                             type: 'command_result',
@@ -216,7 +233,7 @@ function initialize(httpServer, config) {
                     const chromeBridgeModule = pluginManager.getServiceModule('ChromeBridge');
                     const chromeObserverModule = pluginManager.getServiceModule('ChromeObserver');
                     const activeModule = chromeBridgeModule || chromeObserverModule;
-                    
+
                     if (activeModule && typeof activeModule.handleClientMessage === 'function') {
                         // 避免将命令结果再次传递给状态处理器
                         if (parsedMessage.type !== 'command_result' && parsedMessage.type !== 'heartbeat') {
@@ -225,11 +242,11 @@ function initialize(httpServer, config) {
                             // 新增：检查是否有等待的Control客户端，并转发页面信息
                             if (parsedMessage.type === 'pageInfoUpdate') {
                                 console.log(`[WebSocketServer] 🔔 收到 pageInfoUpdate, 当前等待客户端数: ${waitingControlClients.size}`);
-                                
+
                                 if (waitingControlClients.size > 0) {
                                     const pageInfoMarkdown = parsedMessage.data.markdown;
                                     console.log(`[WebSocketServer] 📤 准备转发页面信息，markdown 长度: ${pageInfoMarkdown?.length || 0}`);
-                                    
+
                                     // 遍历所有等待的客户端
                                     waitingControlClients.forEach((requestId, clientId) => {
                                         console.log(`[WebSocketServer] 🎯 尝试转发给客户端 ${clientId}, requestId: ${requestId}`);
@@ -275,6 +292,11 @@ function initialize(httpServer, config) {
                             // 如果没有找到浏览器插件，立即返回错误
                             ws.send(JSON.stringify({ type: 'command_result', data: { requestId: parsedMessage.data.requestId, status: 'error', error: 'No active Chrome browser extension found.' }}));
                         }
+                    }
+                } else if (ws.clientType === 'DesktopClient') {
+                    const desktopBridgeModule = pluginManager.getServiceModule('DesktopBridge');
+                    if (desktopBridgeModule && typeof desktopBridgeModule.handleClientMessage === 'function') {
+                        desktopBridgeModule.handleClientMessage(ws.clientId, parsedMessage);
                     }
                 } else {
                     // 未来处理其他客户端类型的消息
@@ -332,10 +354,10 @@ function broadcast(data, targetClientType = null, abortController = null) {
         }
         return;
     }
-    
+
     if (!wssInstance) return;
     const messageString = JSON.stringify(data);
-    
+
     const clientsToBroadcast = new Map([
        ...clients,
        ...Array.from(distributedServers.values()).map(ds => [ds.ws.clientId, ds.ws])
@@ -424,7 +446,7 @@ function handleDistributedServerMessage(serverId, message) {
                    serverName: message.data.serverName || serverId
                };
                distributedServerIPs.set(serverId, ipData);
-               
+
                // 将 serverName 也存储在主连接对象中，以便通过名字查找
                serverInfo.serverName = ipData.serverName;
                distributedServers.set(serverId, serverInfo);
@@ -438,11 +460,11 @@ function handleDistributedServerMessage(serverId, message) {
             if (message.data && message.data.placeholders) {
                 const serverName = message.data.serverName || serverId;
                 const placeholders = message.data.placeholders;
-                
+
                 if (serverConfig.debugMode) {
                     console.log(`[WebSocketServer] Received static placeholder update from ${serverName} with ${Object.keys(placeholders).length} placeholders.`);
                 }
-                
+
                 // 将分布式服务器的静态占位符更新推送到主服务器的插件管理器
                 pluginManager.updateDistributedStaticPlaceholders(serverId, serverName, placeholders);
             }
@@ -522,7 +544,7 @@ function findServerByIp(ip) {
 function broadcastToAdminPanel(data) {
     if (!wssInstance) return;
     const messageString = JSON.stringify(data);
-    
+
     adminPanelClients.forEach(clientWs => {
         if (clientWs.readyState === WebSocket.OPEN) {
             clientWs.send(messageString);
