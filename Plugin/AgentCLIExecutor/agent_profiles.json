@@ -1,0 +1,28 @@
+{
+  "profiles": {
+    "claude": {
+      "description": "Claude Code CLI - Anthropic's agentic coding tool",
+      "command_template": ["claude", "-p", "{instruction}", "--non-interactive"],
+      "input_mode": "args",
+      "timeout": 1200
+    },
+    "open_interpreter": {
+      "description": "Open Interpreter - Local code execution agent",
+      "command_template": ["interpreter", "--os", "--auto_run", "--api_key", "{env.OPENAI_API_KEY}"],
+      "input_mode": "stdin",
+      "timeout": 1200
+    },
+    "gemini": {
+      "description": "Gemini CLI generic wrapper",
+      "command_template": ["gemini", "chat", "--prompt", "{instruction}"],
+      "input_mode": "args",
+      "timeout": 600
+    },
+    "mock": {
+      "description": "Internal Mock Agent for verification",
+      "command_template": ["python3", "mock_agent.py"],
+      "input_mode": "stdin",
+      "timeout": 60
+    }
+  }
+}
