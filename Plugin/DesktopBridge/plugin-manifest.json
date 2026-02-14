@@ -1,0 +1,41 @@
+{
+    "name": "DesktopBridge",
+    "displayName": "桌面感知桥接器",
+    "version": "1.0.0",
+    "description": "允许 VCP 感知用户桌面内容（如游戏画面）并将其注入到 AI 上下文中。",
+    "pluginType": "hybridservice",
+    "entryPoint": {
+        "script": "DesktopBridge.js"
+    },
+    "communication": {
+        "protocol": "direct",
+        "timeout": 30000
+    },
+    "capabilities": {
+        "systemPromptPlaceholders": [
+            {
+                "placeholder": "{{VCPDesktopImage}}",
+                "description": "当前桌面画面的 Base64 编码（内部使用，自动替换为图像对象）。",
+                "isDynamic": true
+            },
+            {
+                "placeholder": "{{VCPDesktopStatus}}",
+                "description": "桌面客户端连接状态及监控模式状态。",
+                "isDynamic": true
+            }
+        ],
+        "invocationCommands": [
+            {
+                "command": "switch_desktop_mode",
+                "description": "开启或关闭桌面实时监控模式。\n- `command`: 固定为 `switch_desktop_mode`。\n- `active`: `true` (开启) 或 `false` (关闭)。\n\n**调用示例:**\n<<<[TOOL_REQUEST]>>>\ntool_name: 「始」DesktopBridge「末」,\ncommand: 「始」switch_desktop_mode「末」,\nactive: 「始」true「末」\n<<<[END_TOOL_REQUEST]>>>",
+                "example": "**调用示例:**\n<<<[TOOL_REQUEST]>>>\ntool_name: 「始」DesktopBridge「末」,\ncommand: 「始」switch_desktop_mode「末」,\nactive: 「始」true「末」\n<<<[END_TOOL_REQUEST]>>>"
+            }
+        ]
+    },
+    "configSchema": {
+        "DebugMode": "boolean"
+    },
+    "defaults": {
+        "DebugMode": false
+    }
+}

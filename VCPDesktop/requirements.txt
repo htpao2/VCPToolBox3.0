@@ -1,0 +1,4 @@
+websockets
+Pillow
+mss
+requests
