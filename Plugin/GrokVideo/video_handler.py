@@ -276,6 +276,123 @@ def download_video_sync(url, task_id, save_dir):
         log_event("error", f"Failed to download video: {e}")
         return None
 
+# --- 视频拼接功能 ---
+def concat_videos(video_urls, project_base_path, server_port, file_key, var_http_url):
+    """
+    将多个视频按顺序拼接为一个视频。
+    使用 ffmpeg concat demuxer 实现无损拼接。
+    """
+    if not video_urls or len(video_urls) < 2:
+        raise ValueError("视频拼接至少需要 2 个视频 URL。")
+    
+    task_id = str(uuid.uuid4())[:8]
+    temp_dir = tempfile.mkdtemp(prefix='vcp_concat_')
+    downloaded_files = []
+    
+    try:
+        # 1. 下载所有源视频
+        for i, url in enumerate(video_urls):
+            url = url.strip()
+            if not url:
+                continue
+            log_event("info", f"[{task_id}] Downloading video {i+1}/{len(video_urls)}: {url}")
+            
+            parsed = urlparse(url)
+            if parsed.scheme == 'file':
+                # 本地文件，直接解析路径
+                path = parsed.path
+                if not path and parsed.netloc:
+                    path = parsed.netloc + parsed.path
+                file_path = url2pathname(path)
+                if os.name == 'nt':
+                    file_path = re.sub(r'^/([a-zA-Z]:)', r'\\1', file_path)
+                if not os.path.exists(file_path):
+                    raise LocalFileNotFoundError(f"本地视频文件未找到: {file_path}", url)
+                downloaded_files.append(file_path)
+            elif parsed.scheme in ['http', 'https']:
+                # 下载到临时目录
+                local_path = os.path.join(temp_dir, f"input_{i}.mp4")
+                response = requests.get(url, stream=True, timeout=60)
+                response.raise_for_status()
+                with open(local_path, 'wb') as f:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        if chunk:
+                            f.write(chunk)
+                downloaded_files.append(local_path)
+                log_event("info", f"[{task_id}] Downloaded to: {local_path}")
+            else:
+                raise ValueError(f"不支持的视频 URL 协议: {parsed.scheme} (video {i+1})")
+        
+        if len(downloaded_files) < 2:
+            raise ValueError("有效视频不足 2 个，无法拼接。")
+        
+        # 2. 创建 ffmpeg concat 列表文件
+        concat_list_path = os.path.join(temp_dir, 'concat_list.txt')
+        with open(concat_list_path, 'w', encoding='utf-8') as f:
+            for vpath in downloaded_files:
+                # ffmpeg concat 要求路径用单引号转义
+                escaped_path = vpath.replace("'", "'\\''")
+                f.write(f"file '{escaped_path}'\n")
+        
+        log_event("info", f"[{task_id}] Concat list created with {len(downloaded_files)} videos")
+        
+        # 3. 确定输出路径
+        output_filename = f"grok_concat_{task_id}.mp4"
+        if project_base_path:
+            video_save_dir = os.path.join(project_base_path, 'file', 'video')
+            os.makedirs(video_save_dir, exist_ok=True)
+            output_path = os.path.join(video_save_dir, output_filename)
+        else:
+            output_path = os.path.join(temp_dir, output_filename)
+        
+        # 4. 执行 ffmpeg 拼接（使用 concat demuxer + 重编码确保兼容性）
+        cmd = [
+            'ffmpeg', '-y',
+            '-f', 'concat',
+            '-safe', '0',
+            '-i', concat_list_path,
+            '-c:v', 'libx264',
+            '-preset', 'fast',
+            '-crf', '23',
+            '-c:a', 'aac',
+            '-movflags', '+faststart',
+            output_path
+        ]
+        
+        log_event("info", f"[{task_id}] Running ffmpeg concat: {' '.join(cmd)}")
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        
+        if result.returncode != 0:
+            raise RuntimeError(f"ffmpeg 拼接失败: {result.stderr.strip()[-300:]}")
+        
+        log_event("info", f"[{task_id}] Concat complete: {output_path}")
+        
+        # 5. 构建可访问的 URL
+        accessible_url = output_path  # fallback
+        local_path_relative = None
+        
+        if project_base_path and server_port and file_key and var_http_url:
+            accessible_url = f"{var_http_url}:{server_port}/pw={file_key}/files/video/{output_filename}"
+            local_path_relative = f"file/video/{output_filename}"
+            log_event("info", f"[{task_id}] Concat accessible URL: {accessible_url}")
+        
+        ai_msg = f"视频拼接成功！共 {len(downloaded_files)} 个视频已合并。\n拼接视频 URL: {accessible_url}"
+        
+        print_json_output("success", result={
+            "video_url": accessible_url,
+            "local_path": local_path_relative,
+            "video_count": len(downloaded_files),
+            "requestId": task_id
+        }, ai_message=ai_msg)
+        
+    finally:
+        # 清理临时目录（但不删除 file:// 指向的原始文件）
+        import shutil
+        try:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        except Exception:
+            pass
+
 # --- 主逻辑 ---
 def main():
     dotenv_path = os.path.join(os.path.dirname(__file__), 'config.env')
@@ -291,10 +408,7 @@ def main():
     imageserver_file_key = os.getenv("FILE_KEY") # 视频应该使用 File_Key
     var_http_url = os.getenv("VarHttpUrl")
 
-    if not api_key:
-        print_json_output("error", error="GROK_API_KEY not found in config.env.")
-        sys.exit(1)
-
+    # 读取输入
     try:
         input_str = sys.stdin.read()
         if not input_str:
@@ -303,6 +417,46 @@ def main():
     except Exception as e:
         print_json_output("error", error=f"Invalid JSON input: {e}")
         sys.exit(1)
+
+    # 路由命令：concat 不需要 API Key
+    command = input_data.get("command", "submit")
+    
+    if command == "concat":
+        try:
+            # 收集所有 video_url 参数（video_url1, video_url2, ... 或 video_urls 数组）
+            video_urls = input_data.get("video_urls", [])
+            if not video_urls:
+                # 兼容 video_url1, video_url2, ... 的写法
+                i = 1
+                while True:
+                    url = input_data.get(f"video_url{i}")
+                    if not url:
+                        break
+                    video_urls.append(url)
+                    i += 1
+            
+            concat_videos(video_urls, project_base_path, server_port, imageserver_file_key, var_http_url)
+        except LocalFileNotFoundError as e:
+            error_payload = {
+                "status": "error",
+                "code": "FILE_NOT_FOUND_LOCALLY",
+                "error": str(e),
+                "fileUrl": e.file_url
+            }
+            print(json.dumps(error_payload, ensure_ascii=False))
+            sys.exit(1)
+        except Exception as e:
+            log_event("error", f"Concat failed", {"error": str(e), "traceback": traceback.format_exc()})
+            print_json_output("error", error=str(e))
+            sys.exit(1)
+        return
+    
+    # submit 命令需要 API Key
+    if not api_key:
+        print_json_output("error", error="GROK_API_KEY not found in config.env.")
+        sys.exit(1)
+
+    # submit 命令的主逻辑
 
     image_url = input_data.get("image_url")
     video_url_input = input_data.get("video_url")  # 视频续写专用字段
