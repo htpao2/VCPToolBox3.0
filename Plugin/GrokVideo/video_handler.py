@@ -161,8 +161,8 @@ def main():
     
     # 从环境变量获取 VCP 配置 (由 Plugin.js 注入)
     project_base_path = os.getenv("PROJECT_BASE_PATH")
-    server_port = os.getenv("SERVER_PORT")
-    imageserver_file_key = os.getenv("IMAGESERVER_FILE_KEY") # 视频应该使用 File_Key
+    server_port = os.getenv("PORT")
+    imageserver_file_key = os.getenv("FILE_KEY") # 视频应该使用 File_Key
     var_http_url = os.getenv("VarHttpUrl")
 
     if not api_key:
@@ -208,7 +208,9 @@ def main():
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json"
         }
-        content_list = [{"type": "text", "text": prompt}]
+        # 明确要求生成视频
+        video_prompt = f"{prompt} (Please generate a video based on this description)"
+        content_list = [{"type": "text", "text": video_prompt}]
         if image_base64:
             content_list.append({"type": "image_url", "image_url": {"url": image_base64}})
 
@@ -260,26 +262,39 @@ def main():
 
         # 3. 如果通过JSON或SSE获取到了内容，提取其中的URL
         if content and not video_url:
-            url_match = re.search(r'(https?://[^\s<>"\']+\.(mp4|webp|png|jpg|jpeg)[^\s<>"\']*)', content, re.IGNORECASE)
+            # 修改1: 主提取 - 只找 .mp4
+            url_match = re.search(
+                r'(https?://[^\s<>"\']+\.mp4[^\s<>"\']*)',
+                content, re.IGNORECASE
+            )
             if url_match:
                 video_url = url_match.group(1)
             
             if not video_url:
-                # HTML 标签提取
-                html_match = re.search(r'src=["\']([^"\'>]+\.(mp4|webp|png|jpg|jpeg)[^"\'>]*)["\']', content, re.IGNORECASE)
+                # 修改2: HTML标签提取 - 只找 .mp4
+                html_match = re.search(
+                    r'src=["\']([^"\'>]+\.mp4[^"\'>]*)["\']',
+                    content, re.IGNORECASE
+                )
                 if html_match:
                     video_url = html_match.group(1)
                     
             if not video_url:
-                # Markdown 链接提取
-                md_match = re.search(r'!?\[[^\]]*\]\(([^\)]+\.(mp4|webp|png|jpg|jpeg)[^\)]*)\)', content, re.IGNORECASE)
+                # 修改3: Markdown提取 - 只找 .mp4
+                md_match = re.search(
+                    r'!?\[[^\]]*\]\(([^\)]+\.mp4[^\)]*)\)',
+                    content, re.IGNORECASE
+                )
                 if md_match:
                     video_url = md_match.group(1)
 
-        # 4. 最后一道防线：对整个原始文本进行暴力正则提取
+        # 4. 最后一道防线：对整个原始文本进行暴力正则提取 (修改4: 也只找 .mp4)
         if not video_url:
             log_event("info", f"[{task_id}] Fallback to regex extraction directly from response text")
-            url_match = re.search(r'(https?://[^\s<>"\']+\.(mp4|webp|png|jpg|jpeg)[^\s<>"\']*)', response_text, re.IGNORECASE)
+            url_match = re.search(
+                r'(https?://[^\s<>"\']+\.mp4[^\s<>"\']*)',
+                response_text, re.IGNORECASE
+            )
             if url_match:
                 video_url = url_match.group(1)
 
