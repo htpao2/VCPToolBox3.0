@@ -1,0 +1,30 @@
+{
+  "manifestVersion": "1.0.0",
+  "name": "AICapCut",
+  "version": "1.0.0",
+  "displayName": "AI CapCut Video Editor",
+  "description": "An asynchronous video editing and rendering engine powered by MoviePy and FFmpeg. Supports timeline-based editing and script-to-video generation.",
+  "author": "VCP Developer",
+  "pluginType": "asynchronous",
+  "entryPoint": {
+    "type": "python",
+    "command": "python aicapcut_handler.py"
+  },
+  "communication": {
+    "protocol": "stdio",
+    "timeout": 300000
+  },
+  "capabilities": {
+    "invocationCommands": [
+      {
+        "commandIdentifier": "render_timeline",
+        "description": "Renders a video based on a detailed timeline JSON. Supports video, audio, image clips, and text overlays.\n\nParameters:\n- timeline (JSON Object, required): The timeline definition.\n  Schema:\n  {\n    \"format\": {\"width\": 1080, \"height\": 1920, \"fps\": 30},\n    \"tracks\": [\n      {\n        \"type\": \"video\",\n        \"clips\": [\n          {\"type\": \"video\", \"source\": \"/path/to/vid.mp4\", \"start\": 0, \"end\": 5, \"position\": 0},\n          {\"type\": \"image\", \"source\": \"/path/to/img.jpg\", \"duration\": 3, \"position\": 5}\n        ]\n      },\n      {\n        \"type\": \"audio\",\n        \"clips\": [{\"source\": \"/path/to/music.mp3\", \"start\": 0, \"volume\": 0.5}]\n      },\n      {\n        \"type\": \"text\",\n        \"clips\": [{\"content\": \"Title\", \"start\": 0, \"duration\": 2, \"fontsize\": 50, \"color\": \"white\", \"position\": [\"center\", \"top\"]}]\n      }\n    ]\n  }\n\nReturns:\n- A dynamic placeholder: {{VCP_ASYNC_RESULT::AICapCut::{task_id}}}\n\nCall Format:\n<<<[TOOL_REQUEST]>>>\ntool_name:「始」AICapCut「末」,\ncommand:「始」render_timeline「末」,\ntimeline:「始」{...}「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\ntool_name:「始」AICapCut「末」,\ncommand:「始」render_timeline「末」,\ntimeline:「始」{\"tracks\": [...]}「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "commandIdentifier": "script_to_video",
+        "description": "Generates a video from a text script using TTS and visual generation.\n\nParameters:\n- script (String, required): The text content of the video.\n- voice (String, optional): Voice ID for TTS (default: 'en-US-AnaNeural' or 'zh-CN-XiaoxiaoNeural').\n- background_images (Array of Strings, optional): List of image paths to use as background. If not provided, solid colors will be used.\n\nReturns:\n- A dynamic placeholder: {{VCP_ASYNC_RESULT::AICapCut::{task_id}}}\n\nCall Format:\n<<<[TOOL_REQUEST]>>>\ntool_name:「始」AICapCut「末」,\ncommand:「始」script_to_video「末」,\nscript:「始」Hello world. This is a generated video.「末」\n<<<[END_TOOL_REQUEST]>>>"
+      }
+    ]
+  }
+}
