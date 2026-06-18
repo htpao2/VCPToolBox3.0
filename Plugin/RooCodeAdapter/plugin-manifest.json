@@ -1,0 +1,25 @@
+{
+  "manifestVersion": "1.0.0",
+  "name": "RooCodeAdapter",
+  "version": "1.0.0",
+  "displayName": "Roo Code Adapter Service",
+  "description": "A middleware service that acts as a bridge between the Roo Code VSCode Extension and the VCP Server. It translates VCP tool calls into Roo Code XML format.",
+  "author": "VCP Team",
+  "pluginType": "service",
+  "entryPoint": {
+    "type": "nodejs",
+    "command": "node adapter_server.js"
+  },
+  "configSchema": {
+    "ADAPTER_PORT": {
+      "type": "number",
+      "description": "The port this adapter service listens on.",
+      "default": 3001
+    },
+    "VCP_SERVER_URL": {
+      "type": "string",
+      "description": "The URL of the main VCP server API.",
+      "default": "http://localhost:3000/v1"
+    }
+  }
+}
