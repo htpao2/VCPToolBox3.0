@@ -1,0 +1,44 @@
+{
+  "manifestVersion": "1.0.0",
+  "name": "AgentCLIExecutor",
+  "version": "1.0.0",
+  "displayName": "Agent CLI Executor",
+  "description": "A universal plugin to delegate complex tasks to external CLI agents (e.g., Claude Code, Open Interpreter) asynchronously.",
+  "author": "VCP Team",
+  "pluginType": "asynchronous",
+  "entryPoint": {
+    "type": "python",
+    "command": "python agent_handler.py"
+  },
+  "communication": {
+    "protocol": "stdio",
+    "timeout": 30000
+  },
+  "configSchema": {
+    "CALLBACK_BASE_URL": {
+      "type": "string",
+      "description": "The base URL for VCP server callbacks.",
+      "default": "http://localhost:3000"
+    }
+  },
+  "capabilities": {
+    "invocationCommands": [
+      {
+        "commandIdentifier": "execute_agent",
+        "description": "Delegate a task to an external CLI agent (e.g., Claude Code, Open Interpreter).\nParameters:\n- agent_name (string, required): The name of the agent profile to use (e.g., 'claude', 'open_interpreter', 'gemini'). Must match a key in agent_profiles.json.\n- instruction (string, required): The detailed task description or prompt for the agent.\n- extra_args (string, optional): Additional command line arguments to append (e.g., specific flags).\n\nUsage:\n1. Call this tool with the agent name and instruction.\n2. You will receive a placeholder like {{VCP_ASYNC_RESULT::AgentCLIExecutor::{task_id}}}.\n3. You MUST output this placeholder exactly as is in your response to the user.\n4. When the agent finishes, the system will automatically replace this placeholder with the agent's full execution log and output.",
+        "example": "<<<[TOOL_REQUEST]>>>\ntool_name:「始」AgentCLIExecutor「末」,\nagent_name:「始」claude「末」,\ninstruction:「始」Refactor the login module to use JWT.「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "commandIdentifier": "list_agents",
+        "description": "List all available CLI agent profiles configured in the system.",
+        "example": "<<<[TOOL_REQUEST]>>>\ntool_name:「始」AgentCLIExecutor「末」,\ncommand:「始」list_agents「末」\n<<<[END_TOOL_REQUEST]>>>"
+      }
+    ]
+  },
+  "webSocketPush": {
+    "enabled": true,
+    "messageType": "agent_execution_status",
+    "usePluginResultAsMessage": true,
+    "targetClientType": "VCPLog"
+  }
+}
