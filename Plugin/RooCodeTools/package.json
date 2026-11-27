@@ -1,0 +1,15 @@
+{
+  "name": "RooCodeTools",
+  "version": "1.0.0",
+  "description": "Port of Roo Code tools for VCP",
+  "main": "index.js",
+  "type": "module",
+  "dependencies": {
+    "execa": "^5.1.1",
+    "fastest-levenshtein": "^1.0.16",
+    "fs-extra": "^11.1.1",
+    "glob": "^10.3.10",
+    "puppeteer": "^22.15.0",
+    "diff": "^5.1.0"
+  }
+}
